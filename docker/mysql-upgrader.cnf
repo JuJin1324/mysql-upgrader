@@ -1,0 +1,47 @@
+[mysqld]
+skip-name-resolve
+default_storage_engine = innodb
+default_tmp_storage_engine = innodb
+default-time-zone = '+00:00'
+lower_case_table_names = 1
+transaction-isolation = REPEATABLE-READ
+collation-server = utf8mb4_general_ci
+character-set-server = utf8mb4
+character-set-filesystem = utf8mb4
+activate_all_roles_on_login = ON
+innodb_table_locks = ON
+general_log = ON
+
+binlog_format = 2   # 2:ROW
+innodb_autoinc_lock_mode = 2    # 2: only use binlog_format = 2
+
+
+### For Dev
+max_connections = 100
+
+innodb_sort_buffer_size = 5M
+
+## innodb_redo_log_capacity = innodb_buffer_pool_size
+innodb_redo_log_capacity = 1G
+innodb_buffer_pool_size = 1G
+
+## innodb_buffer_pool_instances = innodb_page_cleaners
+innodb_buffer_pool_instances = 1
+innodb_page_cleaners = 1
+
+## ------------------------------------------------------
+
+### For Production
+#max_connections = 512
+
+#innodb_sort_buffer_size = 64M
+
+## innodb_redo_log_capacity = innodb_buffer_pool_size
+#innodb_redo_log_capacity = 4G
+#innodb_buffer_pool_size = 4G
+
+## innodb_buffer_pool_instances = innodb_page_cleaners
+#innodb_buffer_pool_instances = 8
+#innodb_page_cleaners = 8
+
+#default_table_encryption = ON
