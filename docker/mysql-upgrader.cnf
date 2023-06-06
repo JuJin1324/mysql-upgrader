@@ -29,6 +29,8 @@ innodb_buffer_pool_size = 1G
 innodb_buffer_pool_instances = 1
 innodb_page_cleaners = 1
 
+log_output=TABLE
+
 ## ------------------------------------------------------
 
 ### For Production

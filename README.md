@@ -59,3 +59,144 @@
 > 
 > NOT IN 의 실행 계획은 인덱스 풀 스캔으로 표시되는데, 동등이 아닌 부정형 비교여서 인덱스를 이용해 처리 범위를 줄이는 조건으로는
 > 사용할 수 없기 때문이다. 
+
+### 현재 시각 조회(NOW, SYSDATE)
+> 두 함수 모두 현재의 시간을 반환하는 함수로서 같은 기능을 수행한다. 
+> NOW 함수의 경우 하나의 쿼리에서 모든 NOW 함수는 같은 값을 가지지만 SYSDATE 함수는 하나의 쿼리 내에서도 호출되는 시점에 따라 결괏값이 달라진다.  
+> SYSDATE 함수는 두 가지 큰 잠재적인 문제가 있다.  
+> * SYSDATE 함수가 사용된 SQL 은 레플리카 서버에서 안정적으로 복제되지 못한다.  
+> * SYSDATE 함수와 비교되는 칼럼은 인ㄷ게스를 효율적으로 사용하지 못한다.  
+> 또한 SYSDATE 와 비교하는 조건 절의 경우도 인덱스를 사용하지 못한다. (NOW 는 인덱스를 사용하여 처리된다)  
+> 그래서 꼭 필요한 때가 아니라면 SYSDATE 함수를 사용하지 않는 편이 좋다.  
+
+### 날짜와 시간의 연산(DATE_ADD)
+> ```sql
+> # DATE_ADD(<DateTime>, INTERVAL n <YEAR, MONTH, DAT, HOUR, MINUTE, SECOND>
+> select DATE_ADD(now(), INTERVAL 1 DAY) AS tomorrow;
+> 
+> select DATE_ADD(now(), INTERVAL -1 DAY) AS yesterday;
+> ```
+
+### Hex String 변환
+> HEX(): 이진값(Binary)을 사람이 읽을 수 있는 형태의 16진수의 문자열로 변환하는 함수이다.  
+> UNHEX(): 16진수 문자열을 읽어서 이진값(Binary)로 변환하는 함수다.  
+
+### 암호화 및 해시 함수(MD5, SHA, SHA2)
+> SHA(): SHA-1 암호화 알고리즘 사용, 160비트(20바이트) 해시 값을 반환한다.
+> 
+> SHA2(): SHA 암호화 알고리즘보다 더 강력한 224비트부터 512비트 암호화 알고리즘을 사용.
+> 
+> MD5(): 메시지 다이제스트(Message Digest) 알고리즘을 사용해 128비트(16바이트) 해시 값을 반환한다.    
+> 입력된 문자열(Message)의 길이를 줄이는(Digest) 용도로 사용된다.
+> 
+> 위 함수들 모두 사용자의 비밀번호와 같은 암호화가 필요한 정보를 인코딩하는 데 사용되며, 반환 값은 16진수 문자열 형태이다.  
+> 암호화된 값을 문자열로 저장해 두기 위해서는 각 16진수의 값이 문자로는 2자리로 표현되기 때문에 
+> MD5() 함수는 CHAR(32), SHA() 함수는 CHAR(40)의 타입을 필요로 한다.  
+> 저장 공간을 원래의 16바이트(MD5) 와 20바이트(SHA) 로 줄이고 싶다면 BINARY, VARBINARY 형태의 타입에 저장하면 된다.  
+> 칼럼 타입을 BINARY(16) 또는 BINARY(20) 으로 정의하고, MD5() 함수나 SHA() 함수의 결과를 UNHEX() 함수를 이용해 이진값으로
+> 변환해서 저장하면 된다.  
+> ```sql
+> create table tab_binary(
+>     col_md5 BINARY(16),
+>     col_sha BINARY(20),
+>     col_sha2_256 BINARY(32)
+> );
+> 
+> insert into tab_binary values 
+> (UNHEX(MD5('abc')), UNHEX(SHA('abc')), UNHEX(SHA2('abc', 256)));
+> 
+> select HEX(col_md5), HEX(col_sha), HEX(col_sha2_256) from tab_binary \G; 
+> ```
+> 
+> MD5 함수나 SHA(), SHA2() 함수는 모두 비대칭형 암호화 알고리즘이다. 이 함수들의 결괏값은 중복 가능성이 매우 낮기 때문에 길이가 긴 데이터를
+> 크기를 줄여서 인덱싱(해시)하는 용도로 사용된다. 예를 들어 URL 같은 값은 1KB 를 넘을 때도 있으며 전체적으로 값의 길이가 긴 편이다. 이러한 데이터를
+> 검색하려면 인덱스가 필요하지만 긴 칼럼에 대해 전체 값으로 인덱스를 생성하는 것은 불가능할 뿐만 아니라 공간 낭비도 커진다.  
+> URL 값을 MD5() 함수로 단축하면 16바이트로 저장할 수 있고, 이 16바이트로 인덱스를 생성하면 되기 때문에 상대적으로 효율적이다.  
+> ```sql
+> # MySQL 8.0 버전부터 인덱스 생성에 md5() 함수 사용 
+> create table tb_accesslog(
+>     access_id BIGINT NOT NULL AUTO_INCREMENT,
+>     access_url VARCHAR(1000) NOT NULL,
+>     access_dttm DATETIME NOT NULL,
+>     PRIMARY KEY(access_id),
+>     INDEX ix_accessurl ((UNHEX(MD5(access_url))))
+> ) ENGINE=INNODB;
+> 
+> # 함수 기반의 인덱스를 가진 테이블 INSERT, SELECT 
+> insert into tb_accesslog values (1, 'http://matt.com', NOW());
+> 
+> # 평문 검색하면 결과 안나옴.
+> select * from tb_accesslog where UNHEX(MD5(access_url)) = 'http://matt.com';
+> 
+> # 칼럼 및 검색 값 모두에 함수 사용 필요.
+> select * from tb_accesslog where UNHEX(MD5(access_url)) = UNHEX(MD5('http://matt.com'));
+> ```
+> 인덱스 및 검색 시에 UNHEX 는 사용하지 않고 MD5 만 사용해도 된다. 하지만 UNHEX 사용 시 BINARY 로 저장되기 때문에 인덱스의 크기를 더 줄일 수 있다.  
+
+### 벤치마크(BENCHMARK), 처리 대기(SLEEP)
+> SLEEP() 함수 및 BENCHMARK() 함수는 디버깅이나 테스트 용도의 함수이다.
+> 
+> SLEEP(): from 없이 사용하면 매개변수로 전달하는 숫자의 초 만큼 대기 후 종료한다. from 절이 있으면 해당 테이블에서 반환되는 레코드 수 만큼 SLEEP 함수가
+> 호출되어 설정 한 n * 반환된 레코드 갯수 초 만큼 대기하게 된다.  
+> 
+> BENCHMARK(): 2개의 인자를 필요로 한다. 첫 번째 인자는 반복해서 수행할 횟수이며, 두 번째 인자로는 반복해서 실행할 표현식을 입력하면 된다.  
+> ```sql
+> # 1.5 초 대기 후 종료
+> select SLEEP(1.5);
+> 
+> # employees 테이블의 총 레코드 갯수 * 1 초 대기 후 종료
+> select SLEEP(1) from employees;    
+> 
+> # MD5 함수를 10만번 수행, 반환 값은 의미 없고 실행에 걸린 시간만 보면 된다.  
+> select BENCHMARK(100000, MD5('abcdefghijk'));
+> 
+> # salaries 테이블 풀 테이블 조회를 10만번 수행한다.  
+> select BENCHMARK(100000, (select * from salaries));
+> ```
+> 하지만 이렇게 쿼리를 BENCHMARK() 함수로 확인할 때는 주의할 사항이 있다.  
+> 그것은 "select BENCHMAKR(10, expr)" 와 "select expr" 을 10번 직접 실행하는 것과는 차이가 있다는 것이다. 
+> SQL 클라이언트와 같은 도구로 "select expr"을 10번 실행하는 경우에는 매번 쿼리의 파싱이나 최적화, 테이블 잠금이나 네트워크 비용 등이 소요된다. 
+> 하지만 "select BENCHMAKR(10, expr)"로 실행하는 경우에는 벤치마크 횟수에 관계없이 단 1번의 네트워크, 쿼리 파싱 및 최적화 비용이 소요된다는 점을
+> 고려해야 한다.  
+> 
+> 또한 "select BENCHMAKR(10, expr)"을 사용하면 한 번의 요청으로 expr 표현식이 10번 실행되는 것이므로 이미 할당받은 메모리 자원까지 공유되고,
+> 메모리 할당도 "select expr" 쿼리로 직접 10번 실행하는 것보다는 1/10 밖에 일어나지 않는다.  
+> BENCHMARK 함수로 얻은 쿼리나 함수의 성능은 그 자체로는 큰 의미가 없으며, 동일 기능을 가지지만 다른게 표현된 쿼리 두 개 이상을 
+> 상대적으로 비교 분석하는 용도로 사용할 것을 권장한다.  
+
+### JSON 관련 함수들
+> JSON_PRETTY(): MySQL 클라이언트에서 JSON 데이터의 기본적인 표시 방법은 단순 텍스트 포맷이어서 가독성이 떨어진다. 해당 함수를 이용하여 읽기 쉬운 
+> 포멧으로 변환한다.  
+> 
+> JSON_STORAGE_SIZE(): JSON 데이터는 텍스트 기반이지만 MySQL 서버는 디스크의 저장 공간을 절약하기 위해 JSON 데이터를 실제 디스크에 저장할 때 
+> BSON(Binary JSON) 포맷을 사용한다. 하지만 BSON 으로 변환됐을 때 저장 공간의 크기가 얼마나 될지 예측하기는 어렵다. 이를 위해 MySQL 서버에서는 
+> 해당 함수를 제공한다. 해당 함수의 실행 결과로 반환되는 값의 단위는 바이트(Byte)이다.  
+> 
+> JSON_EXTRACT(): JSON 도큐먼트에서 특정 필드의 값을 가져오는 방법 중 하나이다.  
+> 첫 번째 인자는 JSON 데이터가 저장된 칼럼 또는 JSON 도큐먼트 자체이며, 두 번째 인자는 가져오고자 하는 필드의 JSON 경로를 명시한다.  
+> ```sql
+> # 따옴표 있이 JSON 값 가져오기 - JSON 함수 사용 
+> select emp_no, JSON_EXTRACT(doc, "$.first_name") from employee_docs;
+> 
+> # 따옴표 있이 JSON 값 가져오기 - JSON 표현식 사용
+> select emp_no, doc->"$.first_name" from employee_docs;
+> 
+> # 따옴표 없이 JSON 값 가져오기 - JSON 함수 사용
+> select emp_no, JSON_UNQUOTE(JSON_EXTRACT(doc, "$.first_name")) from employee_docs;
+> 
+> # 따옴표 없이 JSON 값 가져오기 - JSON 표현식 사용
+> select emp_no, doc->>"$.first_name" from employee_docs;
+> ```
+> JSON_EXTRACT() 함수의 결과에는 따옴표가 붙은 상태인데, 두 번째 예제처럼 JSON_UNQUOTE() 함수를 함께 사용하면 따옴표 없이 값만 가져올 수 있다.  
+> 
+> JSON_CONTAINS(): JSON 도큐먼트 또는 지정된 JSON 경로에 JSON 필드를 가지고 있는지 확인하는 함수.
+> ```sql
+> # 방식 1
+> select emp_no from employee_docs
+> where JSON_CONTAINS(doc, '{"first_name":"Christian"}');
+> 
+> # 방식 2
+> select emp_no from employee_docs
+> where JSON_CONTAINS(doc, '"Christian"', '$.first_name');
+> ```
+
