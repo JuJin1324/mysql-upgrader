@@ -11,7 +11,7 @@
 > 이 설정의 기본값은 0으로, DB 나 테이블명에 대해 대소문자를 구분한다.  
 
 ### 날짜
-> MySQL 서버에서는 정해진 형태의 날짜 포맷으롶 표기하면 MySQL 서버가 자동으로 DATE 나 DATETIME 값으로 변환하기 때문에 
+> MySQL 서버에서는 정해진 형태의 날짜 포맷으로 표기하면 MySQL 서버가 자동으로 DATE 나 DATETIME 값으로 변환하기 때문에 
 > 복잡하게 STR_TO_DATE() 같은 함수를 사용하지 않아도 된다.  
 > 
 > DATE 타입은 날짜는 포함하지만 시간은 포함하지 않을 때 사용하는 타입이다.  
@@ -238,4 +238,139 @@
 > group by 절이 칼럼의 정렬까지는 보장하지 않는 형태로 바뀌었다. 그래서 MySQL 8.0 버전부터는 group by 칼럼으로 그루핑과 정렬을 모두 수행하기 위해서는
 > group by 절과 order by 절을 모두 명시해야 한다.
 >
->
+> **날짜 타입 비교**  
+> DATE 혹은 DATETIME 과 문자열 비교 시 STR_TO_DATE 함수를 사용해도 되고 문자열로 사용해도 모두 인덱스를 정상적으로 이용한다.  
+> ```sql
+> # STR_TO_DATE 함수를 사용하여 비교
+> select count(*)
+> from employees
+> where hire_date > STR_TO_DATE('2023-01-23', '%Y-%m-%d');
+> 
+> # 문자열 비교
+> select count(*)
+> from employees
+> where hire_date > '2023-01-23';
+> ```
+> 
+> 그러나 아래와 같이 날짜 타입 칼럼을 변환하여 비교하게되면 인덱스를 사용하지 않는다.  
+> ```sql
+> select count(*)
+> from employees
+> where DATE_FORMAT(hire_date, '%Y-%m-%d') > '2023-01-23';
+> ```
+> 
+> 날짜 타입 칼럼의 값을 더하거나 빼는 함수로 변형한 후 비교해도 마찬가지로 인덱스를 이용할 수 없다.
+> ```sql
+> select count(*)
+> from employees
+> where DATE_ADD(hire_date, INTERVAL 1 YEAR) > '2023-01-23'; 
+> ```
+> 
+> DATETIME 값에서 시간 부분만 떼어 버리고 비교하려면 다음과 같이 DATE() 함수를 사용한다. 
+> ```sql
+> select count(*)
+> from employees
+> where hire_date > DATE(now());  
+> ```
+> DATETIME 과 DATE 타입의 비교에서 타입 변환은 인덱스의 사용 여부에 영향을 미치지 않기 때문에 성능보다는 쿼리의 결과에 주의해서 사용하면 된다.  
+> 
+> DATE 나 DATETIME 타입의 값과 TIMESTAMP 의 값을 별도의 타입 변환 없이 비교하면 문제없이 작동하고 실제 실행 계획도 인덱스 레인지 스캔을 사용해서
+> 동작하는 것처럼 보이지만 사실은 그렇지 않다.  
+> UNIX_TIMESTAMP() 함수의 결괏값은 MySQL 내부적으로는 단순 숫자 값에 불과할 뿐이므로 DATETIME 칼럼과 비교시 원하는 결과를 얻을 수 없다.  
+> DATETIME 칼럼과 TIMESTAMP 값 비교시 다음과 같이 해야한다.  
+> ```sql
+> # TIMESTAMP -> DATETIME
+> select count(*) from employeess
+> where hire_date < FROM_UNIXTIME(UNIX_TIMESTAMP());
+> 
+> # DATETIME -> TIMESTAMP
+> select count(*) from employeess
+> where hire_timestamp < FROM_UNIX_TIMESTAMP('2023-11-23 00:00:00');
+> ```
+> 
+> **Short-Circuit Evaluation**  
+> and 조건 시 앞의 조건이 거짓이면 뒤의 조건의 참/거짓 여부와 관계 없이 무조건 거짓이 됨으로 뒤의 조건은 평가하지 않는 것이 Short-Circuit Evaluation 이다.  
+> MySQL 의 select 문장에서 where 절에 조건 비교 시 조건의 순서에 따라 맨 앞에 기술된 조건에 해당하는 레코드가 0개이면 그 뒤의 조건은 더이상 실행되지 않고
+> 결과가 반환되도록 동작한다.  
+> where 절은 조건 비교 시 조건이 기술된 순서에 따라서 필터를 하며, 인덱스 조건이 있는 경우에만 순서와 상관없이 가장 먼저 실행되고 인덱스가 사용되지 않은
+> 조건은 기술된 순서대로 동작한다.  
+> MySQL 서버에서 쿼리를 작성할 때 가능하면 복잡한 연산 또는 다른 테이블의 레코드를 읽어야 하는 서브쿼리 조건 등은 where 절의 뒤쪽으로 배치하는 것이
+> 성능상 도움이 될 것이다.  
+> 
+> **Limit**  
+> Limit 은 Where 조건이 아니기 때문에 where 조건에 해당하는 레코드를 모두 가져온 후 limit 의 갯수를 추려내는 방식으로 동작한다.  
+> 쿼리 문장에 group by 나 order by 와 같은 전체 범위 작업이 선행되더라도 limit 절이 있다면 크진 않지만 나름의 성능 향상은 있다고 불 수 있다.    
+> order by, distinct, group by 가 인덱스를 이용해 처리될 수 있다면 limit 절은 꼭 필요한 만큼의 레코드만 읽게 만들어주기 때문에 쿼리의 작업량을 상당히
+> 줄여준다.  
+> limit 의 첫번째 인자는 offset 이고 두번째 인자는 갯수(count) 이다.  
+> limit 뒤에 인자를 1개만 사용하는 경우 offset 은 자동으로 0 이고 지정한 인자는 갯수(count)에 해당한다.  
+> ```sql
+> # limit 10 만 쓰면 10개의 레코드만 가져온다는 것이다.
+> select * from employees limit 10;
+> 
+> # limit 0, 10 이면 상위 0번째 레코드부터 10개만 가져온다는 것이다.
+> select * from employees limit 0, 10;
+> ```
+> limit 제한 사항으로는 limit 의 인자로 표현식이나 별도의 서브쿼리를 사용할 수 없다.  
+> 
+> **Count**  
+> count() 함수는 칼럼이나 표현식을 인자로 받으며, 특별한 형태로 "*" 를 사용할 수도 있다. 여기서 "*" 는 select 절에 사용될 때처럼 모든 칼럼을 가져오라는
+> 의미가 아니라 그냥 레코드 자체를 의미하는 것이다. 그래서 count(*) 를 사용하든 count(1) 을 사용하건 동일한 처리 성능을 보인다.  
+> 
+> 대부분 count(*) 쿼리는 페이징 처리를 위해 사용할 때가 많은데, count(*) 쿼리에서 order by 절은 어떤 경우에도 필요치 않음으로 order by 절은 제거하여 사용한다. 
+> 그리고 left join 또한 레코드 건수의 변화가 없거나 아우터 테이블에서 별도의 체크를 하지 않아도 되는 경우에는 모두 제거하는 것이 성능상 좋다.    
+> MySQL 8.0 버전부터는 select count(*) 쿼리에 사용된 order by 절은 옵티마이저가 무사하도록 개선되었다. 하지만 가독성 및 오해를 줄이기 위해서 select count(*)
+> 문에서는 order by 를 제거하자.  
+> 
+> count() 함수에 칼럼명이나 표현식이 인자로 사용되면 그 칼럼이나 표현식의 결과가 NULL 이 아닌 레코드 건수만 반환한다. 예를 들어, "count(col1)" 이라고 
+> select 쿼리에 사용하면 col1 이 NULL 이 아닌 레코드의 건수를 가져온다. 그래서 NULL 이 될 수 있는 칼럼을 count() 함수에 사용할 때는 의도대로 쿼리가
+> 작동하는지 확인하는 것이 좋다.  
+> 
+> **Join**  
+> 조인 시 on 조건에 오는 두 칼럼 모두에 인덱스가 있어야 빠른 조인이 가능하다. 두 칼럼에 모두 인덱스가 없는 경우가 가장 느리게 동작한다.  
+> where 조건 뿐만 아니라 조인의 on 조건에서도 두 칼럼의 데이터 타입이 일치하지 않으면 인덱스를 효율적으로 이용할 수 없다.  
+> 인덱스 사용에 영향을 미치는 데이터 타입 불일치는 다음 타입들 사이에는 발생하지 않기 때문에 다음 타입들은 비교에 사용해도 문제가 없다.
+> * CHAR 타입과 VARCHAR 타입
+> * INT 타입과 BIGINT 타입
+> * DATE 타입과 DATETIME 타입
+> 
+> 문자열 데이터 타입의 경우 문자 집합이나 콜레이션이 다른 경우에는 적절한 인덱스 사용이 불가능하다.  
+> 숫자 데이터 타입의 경우에도 Signed/Unsigned 가 다른 경우에는 적절한 인덱스 사용이 불가능하다.  
+> 
+> MySQL 옵티마이저는 절대 아우터로 조인되는 테이블을 드라이빙 테이블로 선택하지 못하기 때문에 아우터 조인 사용 시 풀 스캔이 필요한 테이블을 드라이빙 테이블로 
+> 선택할 수 있다. 필요한 데이터와 조인되는 테이블 간의 관계를 정확히 파악해서 꼭 필요한 경우가 아니라면 이너 조인을 사용하는 것이 업무 요건을 정확히 구현함과 동시에
+> 쿼리의 성능도 향상시킬 수 있다.  
+> 
+> ```sql
+> select * 
+> from employees e 
+> LEFT JOIN dept_manager mgr ON mgr.emp_no=e.emp_no
+> where mgr.dept_no='d001'; 
+> ```
+> 위와 같이 where 조건에 아우터 테이블의 칼럼 조건을 넣게 되면 MySQL 은 자동으로 LEFT JOIN 을 INNER JOIN 으로 변환시켜서 동작한다.  
+> 정상적인 아우터 조인으로 동작시키려면 아우터 테이블의 칼럼 조건을 where 가 아니라 on 절에 넣어야한다.  
+> 
+> 지연된 조인(Delayed Join) 은 from 절에 서브 쿼리를 통해서 최대한 조인할 레코드의 갯수를 줄여서 조인하는 기법을 말한다.  
+> from 절의 서브쿼리의 경우 임시 테이블을 사용하기 때문에 성능이 낮아진다고 생각할 수 있지만 서브 쿼리를 통해서 가져오는 레코드를 의미있게 줄여준다면 
+> 임시 테이블을 사용함에도 성능의 향상을 더 볼 수도 있다.  
+> from 절의 서브쿼리를 통하지 않았을 때와 비교해서 얼마나 많이 조인 레코드를 줄여주느냐를 고려해서 지연된 조인을 사용해보는 것이 좋을듯 하다.
+> 
+> **Order by**  
+> InnoDB 의 경우 order by 를 사용하지 않았을 때 인덱스를 사용하였다면 인덱스의 순서에 맞게 가져오게되며 풀 테이블 스캔 시 클러스터링 인덱스인 PK dml tnstjfh
+> 가져오게 된다. 하지만 항상 정렬이 필요한 곳에서는 order by 절을 사용해야 한다.  
+> MySQL 에서 order by 절에 쌍따옴표를 사용하여 칼럼명을 표시하게 되면 문자열 리터럴로 인식하여 해당 칼럼명은 무시되기 때문에 쌍따옴표로 칼럼명을 표시하지 않도록
+> 주의해야한다.
+> 
+> **서브 쿼리**  
+> 
+> 
+> **CTE(Common Table Expression)**  
+> 
+> 
+> **윈도우 함수(Window Function)**  
+> 
+> 
+> **잠금을 사용하는 Select**  
+> 
+> 
+> 
