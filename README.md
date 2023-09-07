@@ -468,3 +468,82 @@
 > JOIN UPDATE 문장에서는 `GROUP BY` 나 `ORDER BY` 절은 사용할 수 없다. 
 > 이렇게 문법적으로 지원하지 않는 SQL 에 대해서는 서브쿼리를 이용한 파생 테이블을 사용하여 처리한다.
 
+### 스키마 조작(DDL)
+> **온라인 DDL**  
+> 온라인 DDL 은 스키마를 변경하는 작업 도중에도 다른 커넥션에서 해당 테이블의 데이터를 변경하거나 조회하는 작업을 가능하게 해준다.  
+> MySQL 8.0 버전에서는 `old_alter_table` 시스템 변수의 기본값이 OFF 로 설정되어 있기 때문에 자동으로 온라인 DDL 이 활성화된다. 
+> `ALTER TABLE` 명령을 실행하면 MySQL 서버는 다음과 같은 순서로 스키마 변경에 적합한 알고리즘을 찾는다.
+> 1. `ALGORITHM=INSTANT` 로 스키마 변경이 가능한지 확인 후, 가능하다면 선택 
+> 2. `ALGORITHM=INPLACE` 로 스키마 변경이 가능한지 확인 후, 가능하댜면 선택 
+> 3. `ALGORITHM=COPY` 알고리즘 선택
+> 
+> * INSTANT: 테이블의 데이터는 전혀 변경하지 않고, 메타데이터만 변경하고 작업을 완료한다. 테이블이 가진 레코드 건수와 무관하게 작업 시간은 매우 짧다. 
+> 스키마 변경 도중 테이블의 읽고 쓰기는 대기하게 되지만 스키마 변경 시간이 매우 짧기 때문에 다른 커넥션의 쿼리 처리에는 크게 영향을 미치지 않는다.
+> * INPLACE: 임시 테이블로 데이터를 복사하지 않고 스키마 변경을 실행한다. 레코드의 복사 작업은 없지만 테이블의 모든 레코드를 리빌드해야 하기 때문에
+> 테이블의 크기에 따라 많은 시간이 소요될 수도 있다. 하지만 스키마 변경 중에도 테이블의 읽기와 쓰기가 모두 가능하다.
+> * COPY: 변경된 스키마를 적용한 임시 테이블을 생성하고, 테이블의 레코드를 모두 임시 테이블로 복사한 후 최종적으로 임시 테이블을 RENAME 해서 스키마 변경을 완료한다.
+> 이 방법은 테이블 읽기만 가능하고 DML(INSERT, UPDATE, DELETE)은 실행할 수 없다. 
+> 
+> 온라인 DDL 명령은 알고리즘과 함께 잠금 수준도 명시할 수 있다. `ALGORITHM` 과 `LOCK` 옵션이 명시되지 않으면 MySQL 서버가 적절한 수준의 알고리즘과 잠금 
+> 수준을 선택하게 된다. 
+> 예시) 
+> ```sql
+> ALTER TABLE salary CHANGE to_date end_date DATE NOT NULL,
+>    ALGORITHM=INPLACE, LOCK=NONE;
+> ```
+>
+> 온라인 DDL 에서 INSTANT 알고리즘은 테이블의 메타데이터만 변경하기 때문에 매우 짧은 시간 동안의 메타데이터 잠금만 필요로 하다. 그래서 INSTANT 알고리즘을
+> 사용하는 경우에는 LOCK 옵션은 명시할 수 없다.  
+> INPLACE 나 COPY 알고리즘을 사용하는 경우 LOCK 은 다음 3가지 중 하나를 명시할 수 있다.  
+> * NONE: 아무런 잠금을 걸지 않음.
+> * SHARED: 읽기 잠금을 걸고 스키마 변경을 실행하기 때문에 스키마 변경 중 읽기는 가능하지만 쓰기(INSERT, UPDATE, DELETE)는 불가함.
+> * EXCLUSIVE: 쓰기 잠금을 걸고 스키마 변경을 실행하기 때문에 테이블의 읽고 쓰기가 불가함.  
+> 
+> ALTER TABLE 문장에 ALGORITHM 및 LOCK 을 명시해서 온라인 DDL 알고리즘을 강제할 수 있다. 물론 이렇게 온라인 DDL 알고리즘을 강제한다고 해서 무조건 
+> 그 알고리즘으로 처리되는 것은 아니다. 하지만 명시된 알고리즘으로 온라인 DDL 이 처리되지 못한다면 단순히 에러만 발생시키고 실제 스키마 변경 작업은 시작되지 
+> 않기 때문에 의도하지 않은 잠금과 대기는 발생하지 않는다.  
+> 
+> 다음 순서로 ALGORITHM 과 LOCK 옵션을 시도해보면서 해당 알고리즘이 지원되는지 여부를 판단한다.  
+> 1. `ALGORITHM=INSTANT` 옵션으로 스키마 변경 시도
+> 2. 실패하면 `ALGORITHM=INPLACE, LOCK=NONE` 옵션으로 스키마 변경 시도
+>
+> 실행하고자 하는 스키마 변경 작업으로 인해 DML(INSERT, UPDATE, DELETE) 이 멈춰서는 안 된다면 여기까지만 해보면 된다.
+> 
+> 3. 실패하면 `ALGORITHM=INPLACE, LOCK=SHARED` 옵션으로 스키마 변경 시도
+> 4. 실패하면 `ALGORITHM=COPY, LOCK=SHARED` 옵션으로 스키마 변경 시도
+> 5. 실패하면 `ALGORITHM=COPY, LOCK=EXCLUSIVE` 옵션으로 스키마 변경 시도
+> 
+> 위의 1번과 2번 옵션으로 스키마 변경이 되지 않는다면 점검(서비스를 멈추고)을 걸고 DML 을 멈춘 다음 스키마 변경을 해야 한다는 것을 확인할 수 있다.  
+> 하지만 온라인 DDL 이라고 하더라도 그만큼 MySQL 서버에 부하를 유발할 수 있으며, 그로 인해 다른 커넥션의 쿼리들이 느려질 수도 있다. 그래서 
+> 스키마 변경 시 서버의 자원 사용률을 확인하면서 진행하자.  
+> 
+> 온라인 DDL 이 INSTANT 알고리즘을 사용하는 경우 거의 시작과 동시에 작업이 완료되기 때문에 작업 도중 실패할 가능성은 거의 없다.  
+> 하지만 INPLACE 알고리즘으로 실행되는 경우 내부적으로 테이블 리빌드 과정이 필요하고 최종 로그 적용 과정이 필요해서 중간 과정에서 실패할 가능성이 
+> 상대적으로 높은 편이다. 
+> 
+> 온라인 DDL 을 포함한 모든 ALTER TABLE 명령은 MySQL 서버의 `performance_schema` 를 통해 진행 상황을 모니터링할 수 있다.  
+> ```sql
+> -- // performance_schema 시스템 변수 활성화(MySQL 서버 재시작 필요)
+> SET GLOBAL performance_schema=ON;
+> 
+> -- // 'stage/innodb/alter%' instrument 활성화 
+> UPDATE performance_schema.set_up_instruments
+>   SET ENABLED = 'YES', TIMED = 'YES'
+>   WHERE NAME LIKE 'stage/innodb/alter%';
+> 
+> -- // '%stages%' consumer 활성화
+> UPDATE performance_schema.setup_consumers
+>   SET ENABLED = 'YES'
+>   WHERE NAME LIKE '%stages%';
+> 
+> -- // 스키마 변경 시 진행 상황 조회 
+> SELECT EVENT_NAME, WORK_COMPLETED, WORK_ESTIMATED
+>   FROM performance_schema.events_stages_current;
+> 
+> -- // 스키마 변경이 완료되어서 performance_schema.events_stages_current 테이블 조회 시 결과가 안나오면 history 테이블 조회
+> SELECT EVENT_NAME, WORK_COMPLETED, WORK_ESTIMATED
+>   FROM performance_schema.events_stages_history;
+> ```
+> 
+> 
+
