@@ -545,5 +545,120 @@
 >   FROM performance_schema.events_stages_history;
 > ```
 > 
+> **데이터베이스 변경**  
+> 다른 RDBMS 에서는 스키마(Schema)와 데이터베이스를 구분해서 관리하지만 MySQL 서버에서는 스키마와 데이터베이스는 동격의 개념이다.  
 > 
+> 데이터베이스 생성: `CREATE DATABASE [IF NOT EXISTS] <Database 명>;`    
+> 데이터베이스 목록: `SHOW DATABASES;`  
+> 데이터베이스 선택: `USE <Database 명>;`    
+> 데이터베이스 속성 변경: `ALTER DATABASE <Database 명> CHARACTER SET=euckr COLLATE=euckr_korean_ci;`    
+> 데이터베이스 삭제: `DROP DATABASE [IF EXISTS] <Database 명>;`  
+> 
+> **테이블 변경**  
+> 테이블 구조 조회:   
+> 1.`SHOW CREATE TABLE <Table 명>;`: 최초 테이블을 생성할 때 사용자가 실행한 내용을 그대로 보여주는 것이 아니다. MySQL 서버가 테이블의 메타 정보를
+> 읽어서 이를 CREATE TABLE 명령으로 재적성해서 보여주는 것이다.  
+> 2.`DESC <Table 명>;`: 테이블의 칼럼 정보를 보기 편한 표 형태로 표시해준다. 하지만 인텍스 칼럼의 순서나 외래키, 테이블 자체의 속성을 보여주지는 않으므로
+> 테이블의 전체적인 구조를 한 번에 확인하기는 어렵다.  
+> 
+> **테이블 명 변경**  
+> ```sql
+> RENAME TABLE table1 TO table2; 
+> RENAME TABLE db1.table1 TO db2.table2;
+> ```
+> RENAME TABLE 명령은 단순히 테이블의 이름 변경뿐만 아니라 다른 데이터베이스로 테이블을 이동할 때도 사용할 수 있다.  
+> 
+> 테이블 명을 두고 신규 테이블로 변환하고 싶은 경우 다음과 같이 여러 테이블의 RENAME 명령을 하나의 문장으로 묶어서 실행할 수 있다.  
+> ```sql
+> RENAME TABLE employees TO employees_old
+>              employees_new TO employees;
+> ```
+> 예를 들어 employees 라는 테이블 명을 두고 employees_new 테이블을 만들어서 기존 employees 테이블을 employees_old 로 변경 후
+> employees_new 테이블을 employees 로 변경하고 싶은 경우 다음과 같이 하나의 문장으로 묶어서 실행하면 RENAME TABLE 명령에 명시된 모든 테이블에 대해
+> 잠금을 걸고 테이블의 이름 변경 작업을 실행하게 된다. 응용 프로그램의 입장에서 보면 employees 테이블을 조회하려고 할 때 이미 잠금이 걸려있기 때문에 대기한다.
+> 그리고 RENAME TABLE 명령이 완료되면 employees 테이블의 잠금이 해제되어 employees 테이블의 읽기를 실행한다. 즉 쿼리가 시작될 때와 실제 쿼리를 실행할 때의
+> 대상 테이블이 변경됐지만 응용 프로그램은 이를 알아차리지 못하고 투명하게 실행되는 것이다. 잠깐의 잠금 대기가 발생하는 것이지 에러가 발생하지는 않는다.  
+> 
+> **테이블 상태 조회**  
+> ```sql
+> SELECT * FROM information_schema.TABLES 
+> WHERE TABLE_SCHEMA='<Database 명>' AND TABLE_NAME='<Table 명>';
+> ```
+> 
+> 데이터베이스 디스크 공간 정보 조회  
+> ```sql
+> SELECT TABLE_SCHEMA,
+>   SUM(DATA_LENGTH)/1024/1024 as data_size_mb,
+>   SUM(INDEX_LENGTH)/1024/1024 as index_size_mb
+> FROM information_schema.TABLES
+> GROUP BY TABLE_SCHEMA;
+> ```
+> 
+> **테이블 구조 복사**  
+> `CREATE TABLE temp_employees LIKE employees;`: employees 테이블의 모든 칼럼 및 인덱스가 같은 temp_employees 테이블을 생성한다.  
+> `INSERT INTO temp_employees SELECT * FROM employees`: employees 테이블의 모든 데이터를 temp_employees 테이블에 INSERT 한다.  
+> 
+> **테이블 삭제**  
+> 일반적으로 MySQL 에서 레코드가 많지 않은 테이블을 삭제하는 작업은 서비스 도중이라고 하더라도 문제가 되지 않는다.  
+> 하지만 용량이 매우 큰 테이블을 삭제하는 작업은 상당히 부하가 큰 작업에 속한다. 테이블이 삭제되면 MySQL 서버는 해당 테이블이 사용하던 데이터 파일을
+> 삭제해야 하는데, 이 파일의 크기가 매우 크고 디스크에서 파일의 조각들이 너무 분산되어 저장돼 있다면 많은 디스크 읽고 쓰기 작업이 필요하다. 
+> 테이블 삭제가 직접 다른 커넥션의 쿼리를 방해하지는 않지만 간접적으로 영향을 미칠 수도 있다. 그래서 테이블이 크다면 서비스 도중에 삭제 작업(DROP TABLE)은
+> 수행하지 않는 것이 좋다.  
+> 
+> **칼럼 삭제**  
+> ```sql
+> ALTER TABLE employees DROP COLUMN emp_telno,
+> ALGORITHM=INPLACE, LOCK=NONE;
+> ```
+> 칼럼을 삭제하는 작업은 항상 테이블의 리빌드를 필요로 하기 때문에 INSTANT 알고리즘을 사용할 수 없다. 그래서 항상 INPLACE 알고리즘으로만 칼럼 삭제가
+> 가능하다.
+> 
+> **인덱스 조회**  
+> ```sql
+> SHOW INDEX FROM <Table 명>;
+> ```
+> `Seq_in_index`: 단일 칼럼으로 생성된 인덱스는 1만 표시되며, 복합 칼럼 인덱스인 경우 1부터 2,3,4 형태로 증가한다.  
+> `Cardinality`: 유니크한 값의 개수를 보여준다.  
+> 
+> **인덱스 가시성 변경**  
+> MySQL 8.0 버전부터는 인덱스를 삭제하기 전에 먼저 해당 인덱스를 보이지 않게 변경해서 하루 이틀 정도 상황을 모니터링한 후 안전하게 인덱스를 삭제할 수 있게 됐다.  
+> 인덱스가 사용되지 못하게 하는 DDL 문장: `ALTER TABLE employees ALTER INDEX ix_firstname INVISIBLE;`  
+> 인덱스를 다시 사용할 수 있게하는 DDL 문장: `ALTER TABLE employees ALTER INDEX ix_firstname VISIBLE;`  
+> 인덱스를 최초 생성 시 사용되지 못하게 하는 DDL 문장: `ALTER TABLE employees ADD INDEX ix_firstname(first_name) INVISIBLE;`  
+> 
+> 새로 생성하는 인덱스가 적절한 성능을 낼 수 있는지 불분명하다면 INVISIBLE 로 인덱스를 생성하고, 적절히 부하가 낮은 시점을 골라서 인덱스를 VISIBLE 로 
+> 변경하여 테스트해볼 수 있다. 서버의 성능이 떨어진다면 다시 INVISIBLE 로 바꾸고 원인을 좀 더 분석해볼 수도 있다.
+> 
+> **활성 트랜잭션 조회**  
+> 5초 이상 활성 상태로 남아있는 프로세스만 조사하는 쿼리
+> ```sql
+> SELECT trx_id,
+>   (SELECT CONCAT(user, '@', host)
+>    FROM information_schema.processlist
+>    WHERE id=trx_mysql_thread_id) AS source_info,
+>   trx_state,
+>   trx_started,
+>   now(),
+>   (unix_timestamp(now()) - unix_timestamp(trx_started)) AS lasting_sec,
+>   trx_requested_lock_id,
+>   trx_wait_started,
+>   trx_mysql_thread_id,
+>   trx_tables_in_use,
+>   trxt_tables_locked
+> FROM information_schema.innodb_trx
+> WHERE (unix_timestamp(now()) - unix_timestamp(trxt_started)) > 5 \G
+> ```
+> 
+> trx_id 가 어떤 레코드에 대해서 잠금을 가지고 있는지 확인하는 쿼리는 다음과 같다.
+> ```sql
+> SELECT * FROM performance_schema.data_locks \G
+> ```
+> 
+> **쿼리 테스트 횟수**  
+> 일반적으로 쿼리의 성능 테스트는 콜드 상태(캐시나 버퍼가 모두 초기화된 상태)가 아닌 워밍업된 상태(캐시나 버퍼가 필요한 데이터로 준비된 상태)를 가정하고
+> 테스트하는 편이다. 어느 정도 사용량이 있는 서비스라면 콜드 상태에서 워밍업 상태로 전환하는 데 그다지 오래 걸리지 않기 때문에 서비스 환경의 쿼리는 대부분 콜드 상태보다는
+> 워밍업된 상태에서 실행된다고 불 수 있다.  
+> 
+> 테스트하려는 쿼리를 번갈아 가면서 6~7번 정도 실행한 후, 처음 한두 번의 결과는 버리고 나머지 결과의 평균값을 기준으로 비교하는 것이 좋다. 처음에는 운영체제 캐시나
+> MySQL 의 버퍼 풀이 준비되지 않을 때가 많아서 대체로 많은 시간이 소요되는 편이어서 편차가 클 수 있기 때문이다.  
 
