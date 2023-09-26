@@ -662,3 +662,67 @@
 > 테스트하려는 쿼리를 번갈아 가면서 6~7번 정도 실행한 후, 처음 한두 번의 결과는 버리고 나머지 결과의 평균값을 기준으로 비교하는 것이 좋다. 처음에는 운영체제 캐시나
 > MySQL 의 버퍼 풀이 준비되지 않을 때가 많아서 대체로 많은 시간이 소요되는 편이어서 편차가 클 수 있기 때문이다.  
 
+---
+
+## 확장 검색
+### 전문 검색
+> MySQL 서버에서는 다음 2가지 알고리즘을 이용해 인덱싱할 토큰을 분리해낸다.  
+> * 형태소 분석(서구권 언어의 경우 어근 분석) 
+> * n-gram 파서
+> 
+> MySQL 서버에서는 형태소 분석이나 어근 분석 기능은 구현돼 있지 않다.  
+> n-gram 은 문장 자체에 대한 이해 없이 공백과 같은 띄어쓰기 단위로 단어를 분리하고, 그 단어를 단순히 주어진 길이(n-gram 의 n 은 1~10 사이의 숫자 값)로 쪼개서 
+> 인덱싱하는 알고리즘이다.  
+>
+> n-gram 알고리즘에서 n의 값을 2로한 bi-gram 혹은 3으로 한 tri-gram 이 가장 일반적으로 사용된다.  
+> bi-gram 과 tri-gram 을 설정하는 시스템 변수인 `ngram_token_size` 는 읽기 전용이며, MySQL 서버의 설정 파일을 이용해 서버가 시작될 때만 변경할 수 있다.  
+> 
+> **테이블 생성 시 인덱스 설정 쿼리**  
+> ```sql
+> CREATE TABLE tb_bi_gram (
+>   id BIGINT NOT NULL AUTO_INCREMENT,
+>   title VARCHAR(100),
+>   body TEXT,
+>   PRIMARY KEY(id),
+>   FULLTEXT INDEX fx_msg(title, body) WITH PARSER ngram
+> );
+> ```
+> 
+> **검색 쿼리**  
+> ```sql
+> -- 자연어 검색
+> SELECT COUNT(*) FROM tb_bi_gram
+>   WHERE MATCH(title, body) AGAINST ('단편');
+> 
+> -- 불리언 검색
+> SELECT COUNT(*) FROM tb_bi_gram
+>   WHERE MATCH(title, body) AGAINST ('적인' IN BOOLEAN MODE);
+> ```
+> 
+> 검색어의 길이가 ngram_token_size 보다 작은 경우에는 검색이 불가능하다. 예를 들어, ngram_token_size=2 인 bi-gram 인 경우 2글자 이상의 검색어는 사용 가능하지만
+> 1글자 검색어는 결과를 가져오지 못한다. 이러한 특성 때문에 한글에서는 ngram_token_size 의 값으로 2가 범용적으로 적절한 선택이 될 것이다.  
+
+### 전문 검색 쿼리 모드
+> **자연어 검색(NATURAL LANGUAGE MODE)**  
+> 전문 검색 쿼리에서 특별히 모드를 지정하지 않으면 자연어 검색 모드가 사용된다.  
+> MySQL 서버의 자연어 검색은 검색어에 제시된 단어들을 많이 가지고 있는 순서대로 정렬해서 결과를 반환한다.  
+> 전문 검색 쿼리의 검색어에는 반드시 단일 단어만 사용되는 것은 아니다. 문장도 사용할 수 있다.  
+> 
+> **불리언 검색(BOOLEAN MODE)**  
+> 불리언 검색은 쿼리에 사용되는 검색어의 존재 여부에 대해 논리적 연산이 가능하다. 검색어에 +, - 기호를 이용해서 +기호가 붙은 검색어는 검색에 포함하지만 -기호가 붙은
+> 검색어는 검색에 포함하지 않도록 설정이 가능하다.  
+
+### 전문 검색 인덱스 디버깅
+> MySQL 서버에서는 전문 검색 쿼리 오류의 원인을 쉽게 찾을 수 있게 다음과 같이 전문 검색 인덱스 디버깅 기능을 제공한다.  
+> ```sql
+> SET GLOBAL innodb_ft_aux_table = '<DB 명>/<Table 명>';
+> ```
+> innodb_ft_aux_table 시스템 변수에 전문 검색 인덱스를 가진 테이블이 설정되면 information_schema DB 의 테이블들을 통해 전문 검색 인덱스가 어떻게 저장 및
+> 관리되는지를 볼 수 있게 해준다.  
+> * information_schema.innodb_ft_config  
+> * information_schema.innodb_ft_index_table
+> * information_schema.innodb_ft_index_cache
+> * information_schema.innodb_ft_deleted
+
+### 공간 검색
+> 
