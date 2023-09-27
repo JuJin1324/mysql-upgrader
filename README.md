@@ -725,4 +725,46 @@
 > * information_schema.innodb_ft_deleted
 
 ### 공간 검색
+> **EGSG:4326**  
+> EPSG 코드는 전세계 좌표계 정의에 대한 고유한 명칭입니다.  
+> `EGSG:4326` 은 WGS84 타원체의 경위도 좌표계입니다. 흔히 GPS 등의 기본 좌표계입니다.  
+> 입력되는 값의 단위는 각도(Degree) 입니다.  
+
+### 지리 좌표계
+> 다음 예제에서는 공간 인덱스(Spatial Index)도 같이 생성했는데, 공간 인덱스를 생성하는 칼럼은 반드시 NOT NULL 이어야 한다.  
+> GPS 로부터 받는 위치 정보를 저장하기 위해 WGS 84 좌표계(SRIDrk 4326인 좌표계)로 칼럼을 정의했다.  
+> ```sql
+> CREATE TABLE sphere_coord (
+>   id INT NOT NULL AUTU_INCREMENT,
+>   name VARCHAR(20),
+>   location POINT NOT NULL SRID 4326,
+>   PRIMARY KEY (id),
+>   SPATIAL INDEX sx_location(location)
+> );
+> ```
 > 
+> POINT 자료형에는 `ST_PointFromText('POINT(<위도 값> <경도 값>)', 4326)` 를 넣는다.  
+> 위치 데이터 INSERT 예시
+> ```sql
+> INSERT INTO sphere_coord VALUES (NULL, '서울숲', ST_PointFromText('POINT(37.544738 127.039074)', 4326));
+> ```
+> 
+> 두 점의 거리를 구하는 함수 `ST_Distance_Sphere` 는 결과값으로 미터(Meter) 값을 반환한다.  
+> 예시    
+> ```sql
+> SELECT id, name,
+>   ST_AsText(location) AS location,
+>   ROUND(ST_Distance_Sphere(location,
+>       ST_PointFromText('POINT(37.547027 127.047337', 4326))) AS distance_meters
+> FROM sphere_coord
+> WHERE ST_Distance_Sphere(location,
+>       ST_PointFromText('POINT(37.547027 127.047337', 4326)) < 1000;
+> ```
+> 다른 RDBMS 에서는 인덱스를 이용한 반경 검색이 가능하지만, 안타깝게도 MySQL 서버에서는 아직 인덱스를 이용한 반경 검색 기능(함수)이 없다.
+> 그래서 위의 쿼리는 공간 인덱스(SPATIAL INDEX)를 이용하지 못하고 풀 테이블 스캔을 이용한다.  
+> 
+> MySQL 서버에서 지리 좌표계나 SRS 관리 기능이 도입된 것은 MySQL 8.0 이 처름이다. 그래서 지리 좌표계의 데이터 검색 및 변환 기능, 그리고 성능은 
+> 미숙한 부분이 보인다. 그래서 MySQL 서버를 이용해 지리 좌표계를 활용하고자 한다면 기능의 정확성이나 성능에 대해 조금은 주의가 필요할 수도 있다.
+
+---
+
