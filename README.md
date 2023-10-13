@@ -934,6 +934,57 @@
 > 
 > **DECIMAL**  
 > 소수점 이하의 값까지 정확하게 관리하려면 DECIMAL 타입을 이용해야 한다. 다만 소수가 아닌 정숫값을 관리하기 위해 DECIMAL 타입을 사용하는 것은 성능상으로나
-> 공간 사용면에서 좋지 않다. 단순히 정수를 관리하고자 한다면 INTEGER 나 BIGINT 를 사용하는 것이 좋다.  
+> 공간 사용면에서 좋지 않다. 단순히 정수를 관리하고자 한다면 INTEGER 나 BIGINT 를 사용하는 것이 좋다.
+
+### 날짜와 시간
+> MySQL 에서 지원하는 날짜나 시간에 관련된 데이터 타입으로 `DATE` 와 `DATETIME` 타입이 많이 사용된다.  
+> DATETIME 은 밀리초를 지원하며 밀리초 자릿수를 괄호에 넣어서 사용하면 된다. ex) 밀리초 3자리수: DATETIME(3)  
 > 
+> MySQL 의 날짜 타입은 칼럼 자체에 타임존 정보가 저장되지 않으므로 DATETIME 이나 DATE 타입은 현재 DBMS 커넥션의 
+> 타임존과 관계없이 클라이언트로부터 입력된 값을 그대로 저장하고 조회할 때도 변환없이 그대로 출력한다.
+> 하지만 TIMESTAMP 는 항상 UTC 타임존으로 저장되므로 타임존이 달라져도 값이 자동으로 보정된다.  
 > 
+> MySQL 서버의 칼럼 타입이 TIMESTAMP 든 DATETIME 이든 관계없이, JDBC 드라이버는 날짜 및 시간 정보를 MySQL 타임존에서 
+> JVM 의 타임존으로 변환해서 출력한다.  
+> 
+> 타임존 관련 설정은 한 번 문제가 되기 시작하면 해결하기가 매우 어려운 문제가 될 수 있기 때문에 강제로 타임존을 변환하는 것은 하지말자.  
+
+### ENUM 과 SET
+> ENUM 과 SET 모두 문자열 값을 MySQL 내부적으로 숫자 값으로 매핑해서 관리하는 타입이다.  
+> 
+> **ENUM**  
+> ENUM 타입의 가장 큰 용도는 코드화된 값을 관리하는 것이다.  
+> ```sql
+> CREATE TABLE tb_enum (fd_enum ENUM('PROCESSING', 'FAILUTRE', 'SUCESS'));
+> INSERT INTO tb_enum VALUES ('PROCESSING'), ('FAILURE');
+> ```
+> ENUM 타입은 INSERT 나 UPDATE, SELECT 등의 쿼리에서 CHAR 나 VARCHAR 타입과 같이 문자열처럼 비교하거나 저장할 수 있다.  
+> 하지만 MySQL 서버가 실제로 값을 디스크나 메모리에 저장할 때는 사용자로부터 요청된 문자열이 아니라 그 값에 매핑된 정숫값을 사용한다.  
+> ENUM 타입에 사용할 수 있는 최대 아이템의 개수는 65,535개이며, 아이템의 개수가 255개 미만이면 ENUM 타입은 저장 공간으로 1바이트를 사용하고, 
+> 그 이상인 경우에는 2바이티를 사용한다.  
+> 
+> MySQL 5.6 버전부터는 새로 추가하는 아이템이 ENUM 타입의 제일 마지막으로 추가되는 형태라면 테이블의 구조(메타데이터) 변경만으로
+> 즉시 완료된다.  
+> ```sql
+> // ENUM 끝에 REFUND 를 추가하는 경우 INSTANT 사용 가능.
+> ALTER TABLE tb_enum
+> MODIFY fd_enum ENUM('PROCESSING', 'FAILUTRE', 'SUCESS', 'REFUND'))
+> ALGORITHM=INSTANT;
+> 
+> // ENUM 중간에 REFUND 를 추가하는 경우 테이블 리빌드 필요.
+> ALTER TABLE tb_enum
+> MODIFY fd_enum ENUM('PROCESSING', 'FAILUTRE', 'REFUND', 'SUCESS'))
+> ALGORITHM=COPY, LOCK=SHARED;
+> ```
+> 
+> **SET**  
+> SET 타입도 테이블의 구조에 정의된 아이템을 정숫값으로 매핑해서 저장하는 방식은 똑같다. SET 은 하나의 칼럼에 1개 이상의 값을 저장할 수 있다는 차이점이 있다.
+> ```sql
+> CREATE TABLE tb_set (
+>     fd_set SET('TENNIS', 'SOCCER', 'GOLF', 'BASKETBALL');
+> )
+> 
+> INSERT INTO tb_set (fd_set) VALUES ('SOCCER'), ('GOLF,TENNIS');
+> ```
+
+
