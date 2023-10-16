@@ -987,4 +987,38 @@
 > INSERT INTO tb_set (fd_set) VALUES ('SOCCER'), ('GOLF,TENNIS');
 > ```
 
+### TEXT 와 BLOB
+> TEXT 와 BLOB 탕칩의 유일한 차이점은 TEXT 타입은 문자열을 저장하는 대용량 칼럼이라서 문자 집합이나 콜레이션을 가진다는 것이고, BLOB 타입은 이진 데이터
+> 타입이라서 별도의 문자 집합이나 콜레이션을 가지지 않는다는 것이다.  
+> 
+> MySQL 에서는 버전에 따라 조금씩 차이는 있지만 일반적으로 하나의 레코드는 전체 크기가 64KB 를 넘어설 수 없다. VARCHAR 나 VARBINARY 와 같은 가변
+> 길이 칼럼은 최대 저장 가능 크기를 포함해 64K로 크기가 제한된다. 레코드의 전체 크기가 64KB 를 넘어서서 더 큰 칼럼을 추가할 수 없다면 일부 칼럼을 
+> TEXT 나 BLOB 타입으로 전환해야할 수도 있다.  
+> 
+> 대용량 BLOB 이나 TEXT 칼럼을 사용하는 쿼리가 있다면 MySQL 서버의 `max_allowed_packet` 시스템 변수를 필요한 만큼 충분히 늘려서 설정하는 것이 좋다.  
+
+### JSON 타입
+> MySQL 5.7 버전부터 지원되는 JSON 타입의 칼럼은 JSON 데이터를 문자열로 저장하는 것이 아니라 MongoDB 와 같이 바이너리 포맷의 BSON(Binary JSON) 으로
+> 변환해서 저장한다.  
+> 
+> **부분 업데이트 성능**  
+> MySQL 8.01 버전부터는 JSON 타입에 대해 부분 업데이트 기능을 제공한다. JSON 칼럼의 부분 업데이트 기능은 `JSON_SET()` 과 `JSON_REPLACE`, 
+> `JSON_REMOVE()` 함수를 이용해 JSON 도큐먼트의 특정 필드 값을 변경하거나 삭제하는 경우에만 작동한다.  
+> 
+> 부분 업데이트 시 변경된 내용들만 바이너리 로그에 기록되도록 `binlog_row_value_option` 시스템 변수와 `binlog_row_image` 시스템 변수의 설정값을 
+> 변경하면 JSON 칼럼의 부분 업데이트의 성능을 훨씬 더 빠르게 만들 수 있다.  
+> ```sql
+> SET binlog_format = ROW;
+> SET binlog_row_value_options = PARTIAL_JSON;
+> SET binlog_row_image = MINIMAL;
+> ```
+> 대략 13배 정도 UPDATE 성능이 개선된다.
+> 
+> JSON 칼럼에 저장되는 데이터와 JSON 칼럼으로부터 가공되어 나온 결괏값은 모두 `utf8mb4` 문자 집합과 `utf8mb4_bin` 콜레이션을 가진다.  
+> 
+> **MySQL 에서의 데이터 압축**  
+> MySQL 서버의 압축은 디스크의 공간만 줄이는 수준이지 메모리의 사용 효율까지 높여주진 못한다. 또한 MySQL 서버의 데이터 압축은 다른 DBMS 와는 달리 
+> 메모리에 압축된 페이지와 압축 해제된 페이지가 공존해야 하기 때문에 메모리 효율과 CPU 효율 모두를 떨어뜨릴 수도 있다.  
+
+---
 
