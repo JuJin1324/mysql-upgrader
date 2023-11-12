@@ -1141,3 +1141,230 @@
 
 ---
 
+## Performance 스키마 & Sys 스키마
+### 개요
+> 어떤 경우든지 사용 중인 데이터베이스의 성능을 기존보다 향상시켜야 하는 상황에 놓이면 가장 먼저 해야 할 일은 현재 데이터베이스가 어떤 상태인지 분석하고 성능을
+> 향상시킬 수 있는 튜닝 요소를 찾는 것이다.   
+> MySQL 에서는 사용자가 데이터베이스 상태 분석을 좀 더 수월하게 할 수 있게 MySQL 내부에서 발생하는 이벤트에 대한 상세한 정보를 수집해서 한 곳에 모아
+> 사용자들이 손쉽게 접근해서 확인할 수 있게 하는 기능을 제공한다. 이러한 기능이 바로 Performance 스키마와 Sys 스키마이며, 사용자는 이를 통해
+> 일반 테이블에 저장된 데이터를 조회하는 것처럼 SQL 문을 사용해 수집된 정보를 조회할 수 있다.
+
+### Performance 스키마란?
+> Performance 스키마는 MySQL 서버가 기본적으로 제공하는 시스템 데이터베이스 중 하나로, MySQL 서버의 데이터베이스 목록에서 `performance_schema` 라는 이름의
+> 데이터베이스로 확인할 수 있다.  
+> 
+> Performance 스키마에는 MySQL 서버 내부 동작 및 쿼리 처리와 관련된 세부 정보들이 저장되는 테이블들이 존재하며, 사용자는 이러한 테이블들을 통해 MySQL 서버의
+> 성능을 분석하고 내부 처리 과정 등을 모니터링할 수 있다.  
+> 
+> Performance 스키마는 별도로 구현된 전용 스토리지 엔진인 PERFORMANCE_SCHEMA 스토리지 엔진에 의해 수행된다.  
+> PERFORMANCE_SCHEMA 스토리지 엔진은 MySQL 서버가 동작 중인 상태에서 실시간으로 정보를 수집하며, 수집한 정보를 디스크가 아닌 메모리에 저장한다. 그러므로
+> Performance 스키마가 활성화돼 있는 MySQL 서버에서는 Performance 스키마가 비활성화된 상태로 동작 중인 MySQL 서버보다 CPU 와 메모리 등의 서버 리소스를 
+> 좀 더 소모하게 된다.  
+> 앞서 언급한 것처럼 실제 데이터는 모두 메모리 상에서 관리되므로 MySQL 서버가 재시작하면 해당 데이터는 모두 초기화되어 복구할 수 없음에 유의해야 한다.  
+> Performance 스키마에서 발생하는 데이터 변경은 MySQL 서버의 바이너리 로그에 기록되지 않기 때문에 복제로 연결된 레플리카 서버로 복제되지 않는다.  
+
+### Performance 스키마 구성
+> **Setup 테이블**    
+> Performance 스키마의 데이터 수집 및 저장과 관련된 설정 정보가 저장돼 있으며, 사용자는 이 테이블을 통해 Performance 스키마의 설정을 동적으로 변경할 수 있다.  
+> 
+> **Lock 테이블**  
+> MySQL 에서 발생한 잠금과 관련된 정보를 제공한다.  
+> * data_locks: 현재 잠금이 점유됐거나 잠금이 요청된 상태에 있는 데이터 관련 락(레코드 락 및 갭 락)에 대한 정보를 보여준다.
+> * data_lock_waits: 이미 점유된 데이터 락과 이로 인해 잠금 요청이 차단된 데이터 락 간의 관계 정보를 보여준다. 
+> * metadata_locks
+> * table_handles: 현재 잠금이 점유된 테이블 락들에 대한 정보를 보여준다.  
+
+### Performance 스키마 설정
+> Performance 스키마는 MySQL 5.6.6 버전부터 MySQL 구동 시 기본으로 기능이 활성화되도록 설정이 변경됐다.  
+> 명시적으로 Performance 스키마 기능의 활성화 여부를 제어하고 싶은 경우에는 MySQL 설정 파일에 다음과 같이 옵션을 추가하면 된다.  
+> ```text
+> ## Performance 스키마 기능 비활성화
+> [mysqld]
+> performnace_schema=OFF
+> 
+> ## Performance 스키마 기능 활성화
+> [mysqld]
+> performnace_schema=ON
+> ```
+> 
+> Performance 스키마 활성 상태 확인 쿼리
+> ```sql
+> SHOW GLOBAL VARIABLES LIKE 'performnace_schema';
+> ```
+> 
+> 사용자는 Performance 스키마에 대해 크게 두 가지 부분으로 나누어 설정할 수 있다.  
+> * 메모리 사용량 설정
+> * 데이터 수집 및 저장 설정
+> 
+> Performance 스키마에서는 수집한 데이터를 모두 메모리에 저장하므로 Performance 스키마가 MySQL 서버 동작에 영향을 줄 만큼 과도하게 메모리를 사용하지 않게 
+> 제한하는 것이 좋다. 또한 Performance 스키마를 수집 가능한 모든 이벤트에 대해 데이터를 수집하도록 설정하는 것보다는 사용자가 필요로 하는 이벤트들에 대해서만
+> 수집하도록 설정하는 편이 MySQL 내부적인 오버헤드를 줄이고 MySQL 서버의 성능 저하를 유발하지 않는다.  
+
+### 메모리 사용량 설정
+> 메모리 사용량 제한 확인 쿼리
+> ```sql
+> SELECT VARIABLE_NAME, VARIABLE_VALUE
+> FROM performance_schema.global_variables
+> WHERE VARIABLE_NAME LIKE '%performance_schema%'
+> AND VARIABLE_NAME NOT IN ('performance_schema', 'performance_schema_show_processlist');
+> ```
+> 쿼리 결과의 VARIABLE_VALUE 의 값 중 -1은 정해진 제한 없이 필요에 따라 자동으로 크기가 증가할 수 있음을 의미한다.  
+
+### Sys 스키마 개요
+> Sys 스키마는 Performance 스키마의 불편한 사용성을 보완하고자 도입됐으며, Performance 스키마 및 Information 스키마에 저장돼 있는 데이터를 사용자들이
+> 더욱 쉽게 이해할 수 있는 형태로 출력하는 뷰와 스토어드 프로시저, 함수들을 제공한다.  
+> 
+> 사용자가 root 와 같이 MySQL 에 대해 전체 권한을 가진 DB 계정으로 접속한 경우 Sys 스키마에서 제공하는 모든 데이터베이스 객체를 자유롭게 사용할 수 있으나,
+> 제한적인 권한을 가진 DB 계정에서는 Sys 스키마를 사용하기 위해 추가 권한이 필요할 수 있다. 그러한 DB 계정에서 Sys 스키마를 사용하고자 한다면 다음의 권한들을 
+> 해당 계정에 추가한 후 Sys 스키마를 사용해야 한다.  
+> ```sql
+> GRANT PROCESS ON *.* TO `user`@`host`;
+> GRANT SYSTEM_VARIABLES_ADMIN ON *.* TO `user`@`host`;
+> GRANT ALL PREVILEGES ON `sys`.* TO `user`@`host`;
+> GRANT SELECT, INSERT, UPDATE, DELETE, DROP ON `performance_schema`.* TO `user`@`host`; 
+> ```
+
+### Sys 스키마 구성
+> **뷰**  
+> * host_summary.x$host_summary: 호스트별로 쿼리 처리 및 파일 I/O 와 관련된 정보, 그리고 커넥션 수 및 메모리 사용량 등의 종합적인 정보가 출력된다.
+> * x$host_summary_by_file_io: 호스트별로 발생한 파일 I/O 이벤트 총수와 대기 시간 총합에 대한 정보가 출력된다.  
+> * x$innodb_buffer_stats_by_schema: 데이터베이스별로 사용 중인 메모리 및 데이터 양, 페시지 수 등에 대한 정보가 출력된다. 
+> 이 뷰는 MySQL 서버 성능에 영향을 주므로 서비스에서 사용 중인 MySQL 서버에서 해당 뷰를 조회할 때 주의해야 한다. 
+> * x$innodb_buffer_stats_by_table: 테이블별로 사용 중인 메모리 및 데이터 양, 페이지 수 등에 대한 정보가 출력된다. 
+> 마찬가지로 MySQL 서버 성능에 영향을 주므로 서비스에서 사용 중인 MySQL 서버에서 해당 뷰를 조회할 때 주의해야 한다.  
+> * x$innodb_lock_waits: 현재 실행 중인 트랜잭션에서 획득하기 위해 기다리고 있는 InnoDB 잠금에 대한 정보가 출력된다.   
+> * x$schema_index_statistics: 테이블에 존재하는 각 인덱스의 통계 정보가 출력된다.  
+> * schema_object_overview: 데이터베이스별로 해당 데이터베이스에 존재하는 객체들의 유형(테이블, 프로시저, 트리거 등)별 객체 수 정보가 출력된다.  
+> * x$statement_analysis: MySQL 서버에서 실행된 전체 쿼리들에 대해 데이터베이스 및 쿼리 다이제스트별로 쿼리 처리와 관련된 통계 정보를 출력한다.  
+> * x$statements_with_errors_or_warnings: 쿼리 실행 시 경고 또는 에러를 발생한 쿼리들에 대한 통계 정보를 출력한다.  
+
+### Performance 스키마 및 Sys 스키마 활용 예제
+> **호스트 접속 이력 확인**    
+> ```sql
+> SELECT * FROM performance_schema.hosts;
+> ```
+> `HOST` 칼럼이 NULL 인 데이터에는 MySQL 내부 스레드 및 연결 시 인증에 실패한 커넥션들이 포함된다. 
+> `CURRENT_CONNECTIONS` 칼럼은 현재 연결된 커넥션 수를 의미하며, `TOTAL_CONNECTIONS` 칼럼은 연결됐던 커션의 총수를 의미한다.  
+> 
+> MySQL 에 원격으로 접속한 호스트들에 대해 호스트별로 현재 연결된 커넥션 수를 확인
+> ```sql
+> SELECT HOST, CURRENT_CONNECTIONS 
+> FROM performance_schema.hosts
+> WHERE CURRENT_CONNECTIONS > 0 
+> AND HOST NOT IN ('NULL', '127.0.0.1')
+> ORDER BY HOST;
+> ```
+> 
+> **미사용 DB 계정 확인**  
+> MySQL 서버가 구동된 시점부터 현재까지 사용되지 않은 DB 계정들을 확인하고자 할 때 다음의 쿼리를 사용할 수 있다. 
+> 현재 MySQL 에 생성돼 있는 계정들을 대상으로 계정별 접속 이력 유무와 뷰, 또는 트리거, 스토어드 프로시저 같은 스토어드 프로그램들의 생성 유무를 확인해서
+> 두 경우 모두에 해당되지 않는 계정들의 목록이 출력된다.
+> ```sql
+> SELECT DISTINCT m_u.user, m_u.host
+> FROM mysql.user m_u
+> LEFT JOIN performance_schema.accounts ps_a ON m_u.user = ps_a.user AND ps_a.host = m_u.host
+> LEFT JOIN performance_schema.views is_v ON is_v.definer = CONCAT(m_u.user, '@', m_u.host) AND is_v.security_tyep = 'DEFINER'
+> LEFT JOIN information_schema.routines is_r ON is_r.definer = CONCAT(m_u.user, '@', m_u.host) AND is_r.security_type = 'DEFINER'
+> LEFT JOIN information_schema.events is_e ON is_e.definer = CONCAT(m_u.user, '@', m_u.host)
+> LEFT JOIN information_schema.triggers is_t ON is_t.definer = CONCAT(m_u.user, '@', m_u.host)
+> WHERE ps_a.user IS NULL
+> AND is_v.definer IS NULL 
+> AND is_r.definer IS NULL 
+> AND is_e.definer IS NULL 
+> AND is_t.definer IS NULL 
+> ORDER BY m_u.user, m_u.host;
+> ```
+>
+> **MySQL 총 메모리 사용량 확인**  
+> ```sql
+> SELECT * FROM sys.memory_global_total;
+> ```
+> 
+> **미사용 인덱스 확인**  
+> MySQL 서버가 구동된 시점부터 현재까지 사용되지 않은 인덱스 목록을 확인할 수 있다.
+> ```sql
+> SELECT * FROM sys.schema_unused_indexes;
+> ```
+> 
+> 사용되지 않는 인덱스를 제거할 때는 안전하게 인덱스가 쿼리에 사용되지 않는 INVISIBLE 상태로 먼저 변경해서 일정 기간 동안 문제가 없음을 확인한 후
+> 제거하는 것이 좋다.  
+> ```sql
+> -- 인덱스를 INVISIBLE 상태로 변경
+> ALTER TABLE users ALTER INDEX ix_name INVISIBLE;
+> 
+> -- INVISIBLE 상태 확인
+> SELECT TABLE_NAME, INDEX_NAME, IS_VISIBLE
+> FROM information_schema.statistics
+> WHERE TABLE_SCHEMA='DB1' 
+> AND TABLE_NAME='users' 
+> AND INDEX_NAME='idx_name';
+> ```
+> 
+> **중복된 인덱스 확인**  
+> ```sql
+> SELECT * FROM sys.scheam_redundant_indexes LIMIT 1 \G
+> ```
+> 
+> **변경이 없는 테이블 목록 확인**  
+> MySQL 서버가 구동된 시점부터 현재까지 쓰기가 발생하지 않은 테이블 목록을 확인하고자 할 때 쿼리
+> ```sql
+> SELECT t.table_schema, t.table_name, t.table_rows, tio.count_read, tio.count_write
+> FROM information_schema.tables AS t
+> JOIN performance_schema.table_io_waits_summary_by_table AS tio
+> ON tio.object_schema = t.table_schema AND tio.object_name = t.table_name
+> WHERE t.table_schema NOT IN ('mysql', 'performance_schema', 'sys')
+> AND tio.count_write = 0
+> ORDER BY t.table_schema, t.table_name;
+> ```
+> MySQL 서버가 충분히 오랫동안 구동된 상태라면 지금까지 쓰기가 발생하지 않았으며 또한 저장된 데이터가 없는 테이블은 현재 사용되지 않고 있는 테이블일 가능성이 매우 높다.
+> 그러므로 사용자는 위 쿼리를 통해 얻은 테이블 목록을 바탕으로 추가로 확인 작업을 거쳐 MySQL 서버에서 사용하지 않는 테이블들을 정리할 수 있다.  
+> 
+> **I/O 요청이 많은 테이블 목록 확인**  
+> ```sql
+> SELECT * FROM sys.io_global_by_file_by_bytes 
+> WHERE file LIKE '%ibd'; 
+> ```
+> 
+> **테이블별 작업량 통계 확인**  
+> ```sql
+> SELECT table_schema, table_name, rows_fetched, rows_inserted, rows_updated, rows_deleted, io_read, io_write
+> FROM sys.schema_table_statistics
+> WHERE table_schema NOT IN ('mysql', 'performance_schema', 'sys') \G
+> ```
+> 데이터 변경은 거의 없으나 데이터 조회는 빈번한 것으로 보이는 테이블이 존재하는 경우 해당 테이블에서 사용되는 조회 쿼리를 확인해서 캐싱을 적용해
+> MySQL 서버로 불필요하게 조회 쿼리가 자주 실행되지 않게 개선할 수 있다.  
+> 
+> **자주 실행되는 쿼리 목록 확인**  
+> ```sql
+> SELECT db, exec_count, query 
+> FROM sys.statement_analysis
+> ORDER BY exec_count DESC;
+> ```
+> 자주 실행되는 쿼리 목록을 통해 주로 어떤 쿼리들이 사용되고 있는지 파악할 수 있으며, 예상한 것과 다르게 너무 과도하게 실행되고 있는 쿼리가 
+> 존재하는지도 살펴볼 수 있다.
+> 
+> **실행 시간이 긴 쿼리 목록 확인**  
+> ```sql
+> SELECT query, exec_count, sys.format_time(avg_latency) as "formatted_avg_latency", 
+> rows_sent_avg, rows_examined_avg, last_seen
+> FROM sys.x$statement_analysis
+> ORDER BY avg_latency DESC;
+> ```
+> 
+> **정렬 작업을 수행한 쿼리 목록 확인**   
+> 많은 양의 데이터를 읽은 후 내부적으로 정렬 작업을 수행하는 쿼리들의 경우 서버의 CPU 자원을 많이 소모한다. 이러한 쿼리들이 갑자기 대량으로 MySQL 서버에
+> 유입되면 서버에 부하를 주어 문제가 발생할 수 있다. 따라서 정렬 작업을 수행하는 쿼리들을 확인해서 정렬이 발생하지 않게 쿼리를 수정하거나 테이블 인덱스를
+> 조정해 새로운 인덱스를 추가하는 방안을 고려해보는 것이 좋다.
+> ```sql
+> SELECT * FROM sys.statements_with_sorting ORDER BY last_seen DESC LIMIT 1 \G
+> ```
+> 
+> **임시 테이블을 생성하는 쿼리 목록 확인**  
+> ```sql
+> SELECT * FROM sys.statements_with_temp_tables LIMIT 10 \G
+> ```
+> 
+> **데이터 락 대기 확인**  
+> ```sql
+> SELECT * FROM sys.innodb_lock_waits \G
+> ```
